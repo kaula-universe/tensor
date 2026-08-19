@@ -1,0 +1,278 @@
+# tensor.kl - 张量(3D 体数据)+ 矢量微积分(符号版)
+# 元素用代数库 Expr(符号精确, 不近似): 分数/√/π/函数表达式
+# 标量场: 3D 网格 data[(i*b+j)*c+k]
+# 向量场: 4D 网格 data[((i*b+j)*c+k)*d + comp], d = 分量数(通常 3)
+# 梯度/散度/旋度用符号中心差分(代数库化简, 保持精确)
+import "C:/Code/algebra/algebra"
+import std.memory
+
+pub class Tensor {
+    a: int
+    b: int
+    c: int
+    d: int
+    data: Expr*
+
+    constructor(int a0, int b0, int c0, int d0) {
+        self.a = a0
+        self.b = b0
+        self.c = c0
+        self.d = d0
+        int n = a0 * b0 * c0 * d0
+        self.data = std.memory.kmm_v4_alloc(n * sizeof(Expr))
+        int i = 0
+        while (i < n) {
+            self.data[i] = expr_rat(0, 1)
+            i = i + 1
+        }
+    }
+
+    fn size() int {
+        return self.a * self.b * self.c * self.d
+    }
+
+    # 标量场访问(符号)
+    fn get(int i, int j, int k) Expr {
+        return self.data[(i * self.b + j) * self.c + k]
+    }
+
+    fn set(int i, int j, int k, Expr v) {
+        self.data[(i * self.b + j) * self.c + k] = v
+    }
+
+    # 向量场分量访问(符号)
+    fn getc(int i, int j, int k, int comp) Expr {
+        return self.data[((i * self.b + j) * self.c + k) * self.d + comp]
+    }
+
+    fn setc(int i, int j, int k, int comp, Expr v) {
+        self.data[((i * self.b + j) * self.c + k) * self.d + comp] = v
+    }
+
+    # 打印一层(k 固定)的标量场(符号显示)
+    fn print_layer(int k) {
+        int i = 0
+        while (i < self.a) {
+            int j = 0
+            while (j < self.b) {
+                Expr v = self.get(i, j, k)
+                display(v)
+                j = j + 1
+            }
+            i = i + 1
+        }
+    }
+
+    # 打印向量场一层的第 comp 分量(符号显示)
+    fn print_layerc(int k, int comp) {
+        int i = 0
+        while (i < self.a) {
+            int j = 0
+            while (j < self.b) {
+                Expr v = self.getc(i, j, k, comp)
+                display(v)
+                j = j + 1
+            }
+            i = i + 1
+        }
+    }
+}
+
+# 工厂: 标量场
+pub fn tensor_scalar(a0: int, b0: int, c0: int) Tensor {
+    return Tensor(a0, b0, c0, 1)
+}
+
+# 工厂: 向量场(3 分量)
+pub fn tensor_vector(a0: int, b0: int, c0: int) Tensor {
+    return Tensor(a0, b0, c0, 3)
+}
+
+# 符号中心差分(边界单侧): df/dx, h 为网格间距(整数, 符号精确)
+pub fn fd_dx(f: Tensor, i: int, j: int, k: int, h: int) Expr {
+    if (i == 0) {
+        Expr v0 = f.get(0, j, k)
+        Expr v1 = f.get(1, j, k)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    if (i == f.a - 1) {
+        Expr v0 = f.get(f.a - 2, j, k)
+        Expr v1 = f.get(f.a - 1, j, k)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    Expr vm = f.get(i - 1, j, k)
+    Expr vp = f.get(i + 1, j, k)
+    Expr d = simplify(expr_sub(vp, vm))
+    return simplify(expr_mul(d, expr_rat(1, 2 * h)))
+}
+
+pub fn fd_dy(f: Tensor, i: int, j: int, k: int, h: int) Expr {
+    if (j == 0) {
+        Expr v0 = f.get(i, 0, k)
+        Expr v1 = f.get(i, 1, k)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    if (j == f.b - 1) {
+        Expr v0 = f.get(i, f.b - 2, k)
+        Expr v1 = f.get(i, f.b - 1, k)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    Expr vm = f.get(i, j - 1, k)
+    Expr vp = f.get(i, j + 1, k)
+    Expr d = simplify(expr_sub(vp, vm))
+    return simplify(expr_mul(d, expr_rat(1, 2 * h)))
+}
+
+pub fn fd_dz(f: Tensor, i: int, j: int, k: int, h: int) Expr {
+    if (k == 0) {
+        Expr v0 = f.get(i, j, 0)
+        Expr v1 = f.get(i, j, 1)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    if (k == f.c - 1) {
+        Expr v0 = f.get(i, j, f.c - 2)
+        Expr v1 = f.get(i, j, f.c - 1)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    Expr vm = f.get(i, j, k - 1)
+    Expr vp = f.get(i, j, k + 1)
+    Expr d = simplify(expr_sub(vp, vm))
+    return simplify(expr_mul(d, expr_rat(1, 2 * h)))
+}
+
+# 梯度: 标量场 → 向量场(符号)
+pub fn tensor_grad(f: Tensor, h: int) Tensor {
+    Tensor g = tensor_vector(f.a, f.b, f.c)
+    int i = 0
+    while (i < f.a) {
+        int j = 0
+        while (j < f.b) {
+            int k = 0
+            while (k < f.c) {
+                g.setc(i, j, k, 0, fd_dx(f, i, j, k, h))
+                g.setc(i, j, k, 1, fd_dy(f, i, j, k, h))
+                g.setc(i, j, k, 2, fd_dz(f, i, j, k, h))
+                k = k + 1
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return g
+}
+
+pub fn comp_dx(F: Tensor, i: int, j: int, k: int, comp: int, h: int) Expr {
+    if (i == 0) {
+        Expr v0 = F.getc(0, j, k, comp)
+        Expr v1 = F.getc(1, j, k, comp)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    if (i == F.a - 1) {
+        Expr v0 = F.getc(F.a - 2, j, k, comp)
+        Expr v1 = F.getc(F.a - 1, j, k, comp)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    Expr vm = F.getc(i - 1, j, k, comp)
+    Expr vp = F.getc(i + 1, j, k, comp)
+    Expr d = simplify(expr_sub(vp, vm))
+    return simplify(expr_mul(d, expr_rat(1, 2 * h)))
+}
+
+pub fn comp_dy(F: Tensor, i: int, j: int, k: int, comp: int, h: int) Expr {
+    if (j == 0) {
+        Expr v0 = F.getc(i, 0, k, comp)
+        Expr v1 = F.getc(i, 1, k, comp)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    if (j == F.b - 1) {
+        Expr v0 = F.getc(i, F.b - 2, k, comp)
+        Expr v1 = F.getc(i, F.b - 1, k, comp)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    Expr vm = F.getc(i, j - 1, k, comp)
+    Expr vp = F.getc(i, j + 1, k, comp)
+    Expr d = simplify(expr_sub(vp, vm))
+    return simplify(expr_mul(d, expr_rat(1, 2 * h)))
+}
+
+pub fn comp_dz(F: Tensor, i: int, j: int, k: int, comp: int, h: int) Expr {
+    if (k == 0) {
+        Expr v0 = F.getc(i, j, 0, comp)
+        Expr v1 = F.getc(i, j, 1, comp)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    if (k == F.c - 1) {
+        Expr v0 = F.getc(i, j, F.c - 2, comp)
+        Expr v1 = F.getc(i, j, F.c - 1, comp)
+        Expr d = simplify(expr_sub(v1, v0))
+        return simplify(expr_mul(d, expr_rat(1, h)))
+    }
+    Expr vm = F.getc(i, j, k - 1, comp)
+    Expr vp = F.getc(i, j, k + 1, comp)
+    Expr d = simplify(expr_sub(vp, vm))
+    return simplify(expr_mul(d, expr_rat(1, 2 * h)))
+}
+
+# 散度: 向量场 → 标量场(符号)
+pub fn tensor_div(F: Tensor, h: int) Tensor {
+    Tensor r = tensor_scalar(F.a, F.b, F.c)
+    int i = 0
+    while (i < F.a) {
+        int j = 0
+        while (j < F.b) {
+            int k = 0
+            while (k < F.c) {
+                Expr dx = comp_dx(F, i, j, k, 0, h)
+                Expr dy = comp_dy(F, i, j, k, 1, h)
+                Expr dz = comp_dz(F, i, j, k, 2, h)
+                Expr s1 = simplify(expr_add(dx, dy))
+                Expr s2 = simplify(expr_add(s1, dz))
+                r.set(i, j, k, s2)
+                k = k + 1
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return r
+}
+
+# 旋度: 向量场 → 向量场(符号)
+# curl F = (∂Fz/∂y - ∂Fy/∂z, ∂Fx/∂z - ∂Fz/∂x, ∂Fy/∂x - ∂Fx/∂y)
+pub fn tensor_curl(F: Tensor, h: int) Tensor {
+    Tensor r = tensor_vector(F.a, F.b, F.c)
+    int i = 0
+    while (i < F.a) {
+        int j = 0
+        while (j < F.b) {
+            int k = 0
+            while (k < F.c) {
+                Expr a0 = simplify(expr_sub(comp_dy(F, i, j, k, 2, h), comp_dz(F, i, j, k, 1, h)))
+                Expr a1 = simplify(expr_sub(comp_dz(F, i, j, k, 0, h), comp_dx(F, i, j, k, 2, h)))
+                Expr a2 = simplify(expr_sub(comp_dx(F, i, j, k, 1, h), comp_dy(F, i, j, k, 0, h)))
+                r.setc(i, j, k, 0, a0)
+                r.setc(i, j, k, 1, a1)
+                r.setc(i, j, k, 2, a2)
+                k = k + 1
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return r
+}
+
+# 向量场分量的一阶符号差分(comp 分量)
+
+

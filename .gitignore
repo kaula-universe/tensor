@@ -1,0 +1,15 @@
+# Kaula 编译缓存
+cache/
+
+# 测试目录(本地资产,不提交)
+test/
+
+# 编译产物
+*.exe
+*.o
+*.obj
+*.out
+
+# 系统文件
+Thumbs.db
+.DS_Store
